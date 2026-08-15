@@ -1,0 +1,117 @@
+name: Build Toruń parcel tiles
+
+on:
+  schedule:
+    # Weekly. The source re-exports nightly, but cadastral content changes
+    # slowly, and the content-hash gate skips publication when nothing moved.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even if the content hash is unchanged"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two publishes race for the Pages deployment.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  TIPPECANOE_REF: "2.78.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.gate.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GDAL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gdal-bin
+          ogr2ogr --version
+
+      - name: Cache tippecanoe
+        id: cache-tippecanoe
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tippecanoe
+          key: tippecanoe-${{ env.TIPPECANOE_REF }}-${{ runner.os }}
+
+      - name: Build tippecanoe
+        if: steps.cache-tippecanoe.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y --no-install-recommends build-essential libsqlite3-dev zlib1g-dev
+          git clone --depth 1 --branch "${TIPPECANOE_REF}" https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)"
+          mkdir -p ~/.local/bin
+          cp /tmp/tippecanoe/tippecanoe ~/.local/bin/
+
+      - name: Put tippecanoe on PATH
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Validate source and download
+        run: python scripts/fetch.py
+
+      - name: Reproject and classify
+        run: python scripts/transform.py
+
+      - name: Has anything actually changed?
+        id: gate
+        run: |
+          python scripts/gate.py \
+            --published "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/latest.json"
+
+      - name: Build tiles
+        if: steps.gate.outputs.changed == 'true' || inputs.force
+        run: python scripts/tile.py
+
+      - name: Validate tileset
+        if: steps.gate.outputs.changed == 'true' || inputs.force
+        run: python scripts/validate.py
+
+      - name: Assemble site
+        if: steps.gate.outputs.changed == 'true' || inputs.force
+        run: python scripts/publish.py
+
+      - name: Upload Pages artifact
+        if: steps.gate.outputs.changed == 'true' || inputs.force
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Summary
+        run: |
+          {
+            echo "### Toruń parcel tiles"
+            echo ""
+            echo "* changed: \`${{ steps.gate.outputs.changed }}\`"
+            if [ -f build/stats.json ]; then
+              echo "* features: \`$(python -c 'import json;print(json.load(open("build/stats.json"))["total"])')\`"
+              echo "* content: \`$(python -c 'import json;print(json.load(open("build/stats.json"))["content_sha256"][:12])')\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.changed == 'true' || inputs.force
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

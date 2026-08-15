@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toruń — własność działek</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+  /* Light is the base palette; dark redefines only the tokens, under both the
+     OS media query and an explicit data-theme stamp so a toggle wins either way. */
+  :root {
+    --surface-1: #fcfcfb;
+    --surface-2: #f3f2ef;
+    --border: #d9d8d3;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #78776f;
+
+    /* Validated all-pairs in both modes (blue / orange / aqua). */
+    --tier-publiczna: #2a78d6;
+    --tier-prywatna: #eb6834;
+    --tier-inne: #1baf7a;
+
+    --accent: #2a78d6;      /* isolation highlight */
+    --neutral: #a8a7a0;     /* de-emphasised context */
+    --parcel-line: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface-1: #1a1a19;
+      --surface-2: #232322;
+      --border: #3a3a37;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #93928a;
+      --tier-publiczna: #3987e5;
+      --tier-prywatna: #d95926;
+      --tier-inne: #199e70;
+      --accent: #3987e5;
+      --neutral: #5c5b56;
+      --parcel-line: #12120f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --border: #3a3a37;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #93928a;
+    --tier-publiczna: #3987e5;
+    --tier-prywatna: #d95926;
+    --tier-inne: #199e70;
+    --accent: #3987e5;
+    --neutral: #5c5b56;
+    --parcel-line: #12120f;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  #map { position: absolute; inset: 0; background: var(--surface-1); }
+
+  .panel {
+    position: absolute; top: 12px; left: 12px; z-index: 2;
+    width: 310px; max-height: calc(100% - 24px); overflow-y: auto;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.12);
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: -.01em; }
+  .sub { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); margin: 14px 0 6px; font-weight: 600;
+  }
+  .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 0; font-size: 13px;
+  }
+  .sw {
+    width: 14px; height: 14px; border-radius: 3px; flex: none;
+    border: 1px solid rgba(128,128,128,.35);
+  }
+  .count { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+  button.cls {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 5px 6px; margin: 1px 0; font: inherit; font-size: 13px;
+    text-align: left; cursor: pointer; border-radius: 6px;
+    background: transparent; border: 1px solid transparent; color: var(--text-primary);
+  }
+  button.cls:hover { background: var(--surface-2); }
+  button.cls[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-2); }
+
+  .hint { font-size: 11.5px; color: var(--text-muted); margin-top: 8px; }
+  .note {
+    font-size: 11.5px; color: var(--text-secondary); margin-top: 12px;
+    border-top: 1px solid var(--border); padding-top: 10px;
+  }
+  a { color: var(--accent); }
+
+  .maplibregl-popup-content {
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+    font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; padding: 10px 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.15);
+  }
+  .maplibregl-popup-tip { border-top-color: var(--surface-1) !important; }
+  .pop-id { font-weight: 600; margin-bottom: 4px; }
+  .pop-k { color: var(--text-muted); }
+  .pop-r { display: flex; gap: 10px; justify-content: space-between; }
+  #status {
+    position: absolute; bottom: 12px; left: 12px; z-index: 2;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text-secondary);
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <h1>Własność działek — Toruń</h1>
+  <p class="sub">Grupy rejestrowe ewidencji gruntów i budynków.</p>
+
+  <h2>Widok domyślny</h2>
+  <div class="row"><span class="sw" style="background:var(--tier-publiczna)"></span>
+    Własność publiczna<span class="count" id="c-publiczna">—</span></div>
+  <div class="row"><span class="sw" style="background:var(--tier-prywatna)"></span>
+    Osoby fizyczne<span class="count" id="c-prywatna">—</span></div>
+  <div class="row"><span class="sw" style="background:var(--tier-inne)"></span>
+    Inne podmioty<span class="count" id="c-inne">—</span></div>
+  <div class="row"><span class="sw" id="sw-uw"></span>
+    Użytkowanie wieczyste<span class="count" id="c-uw">—</span></div>
+  <div class="hint">Liczby to <strong>liczba działek</strong>, nie powierzchnia —
+    działki publiczne są średnio znacznie większe.</div>
+
+  <h2>Wyróżnij grupę</h2>
+  <div id="classes"></div>
+  <div class="hint">Kliknij, aby wyróżnić jedną klasę. Kliknij ponownie, aby wrócić.</div>
+
+  <div class="note">
+    Serwis udostępnia wyłącznie <strong>grupę rejestrową</strong> — kategorię
+    właściciela, nie jego dane osobowe (art. 40a ust. 2 pkt 1 Pgik).
+    Powierzchnia i klasoużytki nie są publikowane.
+    <div id="attribution" style="margin-top:8px"></div>
+    <div id="build" style="margin-top:4px"></div>
+  </div>
+</div>
+
+<div id="status">Ładowanie…</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
+<script>
+const CLASS_LABELS = {
+  osoba_fizyczna:     "Osoby fizyczne",
+  gmina:              "Gmina Toruń",
+  skarb_panstwa:      "Skarb Państwa",
+  spolka_handlowa:    "Spółki prawa handlowego",
+  spoldzielnia:       "Spółdzielnie",
+  wojewodztwo_powiat: "Województwo / powiat",
+  pozostale:          "Pozostałe",
+};
+
+const GROUP_LABELS = {
+  1:"Skarb Państwa (bez uż. wieczystych)", 2:"Skarb Państwa (z uż. wieczystymi)",
+  3:"Spółki i osoby prawne Skarbu Państwa", 4:"Gmina (bez uż. wieczystych)",
+  5:"Gmina (z uż. wieczystymi)", 6:"Spółki jednostek samorządu terytorialnego",
+  7:"Osoby fizyczne", 8:"Spółdzielnie", 9:"Kościoły i związki wyznaniowe",
+  10:"Wspólnoty gruntowe", 11:"Powiat (bez uż. wieczystych)",
+  12:"Powiat (z uż. wieczystymi)", 13:"Województwo (bez uż. wieczystych)",
+  14:"Województwo (z uż. wieczystymi)", 15:"Spółki prawa handlowego",
+  16:"Inne podmioty",
+};
+
+const TIERS = {
+  publiczna: ["skarb_panstwa", "gmina", "wojewodztwo_powiat"],
+  prywatna:  ["osoba_fizyczna"],
+  inne:      ["spolka_handlowa", "spoldzielnia", "pozostale"],
+};
+
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+let map, isolated = null, stats = null, manifest = null;
+
+/**
+ * Attribution required by art. 40c ust. 3 Prawo geodezyjne i kartograficzne:
+ * anyone publishing work built on material from the panstwowy zasob
+ * geodezyjny i kartograficzny must state its source. The Open Data Act also
+ * permits the provider to require the time of creation and of acquisition,
+ * so both are shown when the manifest supplies them.
+ */
+function attributionHtml() {
+  const a = (manifest && manifest.attribution) || {};
+  const source = a.source || "Państwowy zasób geodezyjny i kartograficzny";
+  const dataset = a.dataset || "Ewidencja gruntów i budynków (EGiB)";
+  const parts = [`Źródło: ${source} — ${dataset}`];
+  if (a.created) parts.push(`stan na ${a.created}`);
+  if (a.retrieved) parts.push(`pobrano ${a.retrieved}`);
+  return parts.join(" · ");
+}
+
+function tierFillExpression() {
+  return [
+    "match", ["get", "klasa"],
+    TIERS.publiczna, css("--tier-publiczna"),
+    TIERS.prywatna,  css("--tier-prywatna"),
+    css("--tier-inne"),
+  ];
+}
+
+function fillExpression() {
+  if (!isolated) return tierFillExpression();
+  // Isolation is a deliberate two-colour view: one hue against a de-emphasised
+  // neutral. Safe for every vision type regardless of which class is picked.
+  return ["case", ["==", ["get", "klasa"], isolated], css("--accent"), css("--neutral")];
+}
+
+function opacityExpression() {
+  if (!isolated) return 0.72;
+  return ["case", ["==", ["get", "klasa"], isolated], 0.85, 0.28];
+}
+
+/** 8px diagonal hatch, drawn at runtime so there is no external asset. */
+function hatchImage(color) {
+  const s = 8, c = document.createElement("canvas");
+  c.width = c.height = s;
+  const g = c.getContext("2d");
+  g.strokeStyle = color;
+  g.lineWidth = 1.6;
+  g.beginPath();
+  for (let i = -s; i < s * 2; i += 4) { g.moveTo(i, -1); g.lineTo(i + s, s + 1); }
+  g.stroke();
+  return { width: s, height: s, data: new Uint8Array(g.getImageData(0, 0, s, s).data) };
+}
+
+async function resolveTilesetUrl() {
+  try {
+    const res = await fetch("latest.json", { cache: "no-store" });
+    if (res.ok) {
+      manifest = await res.json();
+      document.getElementById("build").textContent =
+        `Wersja ${manifest.version} · ${manifest.features.toLocaleString("pl")} działek`;
+      return new URL(manifest.url, location.href).href;
+    }
+  } catch (_) { /* fall through to the co-located file */ }
+  return new URL("parcels-evidence.pmtiles", location.href).href;
+}
+
+async function loadStats() {
+  try {
+    const res = await fetch("stats.json", { cache: "no-store" });
+    if (res.ok) stats = await res.json();
+  } catch (_) { /* counts stay blank */ }
+}
+
+function renderLegend() {
+  const fmt = (n) => n == null ? "—" : n.toLocaleString("pl");
+  if (stats) {
+    const sum = (keys) => keys.reduce((a, k) => a + (stats.classes[k] || 0), 0);
+    document.getElementById("c-publiczna").textContent = fmt(sum(TIERS.publiczna));
+    document.getElementById("c-prywatna").textContent  = fmt(sum(TIERS.prywatna));
+    document.getElementById("c-inne").textContent      = fmt(sum(TIERS.inne));
+    document.getElementById("c-uw").textContent        = fmt(stats.usufruct);
+  }
+
+  const host = document.getElementById("classes");
+  host.innerHTML = "";
+  for (const [key, label] of Object.entries(CLASS_LABELS)) {
+    const btn = document.createElement("button");
+    btn.className = "cls";
+    btn.type = "button";
+    btn.setAttribute("aria-pressed", String(isolated === key));
+    const swatch = document.createElement("span");
+    swatch.className = "sw";
+    swatch.style.background = isolated === key ? css("--accent") : css("--neutral");
+    const text = document.createElement("span");
+    text.textContent = label;
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = stats ? fmt(stats.classes[key] || 0) : "—";
+    btn.append(swatch, text, count);
+    btn.onclick = () => {
+      isolated = isolated === key ? null : key;
+      map.setPaintProperty("parcels-fill", "fill-color", fillExpression());
+      map.setPaintProperty("parcels-fill", "fill-opacity", opacityExpression());
+      renderLegend();
+    };
+    host.appendChild(btn);
+  }
+
+  const uwSwatch = document.getElementById("sw-uw");
+  uwSwatch.style.background =
+    `repeating-linear-gradient(45deg, ${css("--text-muted")} 0 1.5px, transparent 1.5px 4px)`;
+}
+
+async function main() {
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol("pmtiles", protocol.tile);
+
+  await loadStats();
+  const url = await resolveTilesetUrl();
+
+  map = new maplibregl.Map({
+    container: "map",
+    style: {
+      version: 8,
+      sources: {
+        parcels: {
+          type: "vector",
+          url: "pmtiles://" + url,
+          attribution: attributionHtml(),
+        },
+      },
+      layers: [
+        { id: "bg", type: "background",
+          paint: { "background-color": css("--surface-1") } },
+        { id: "parcels-fill", type: "fill", source: "parcels", "source-layer": "parcels",
+          paint: { "fill-color": tierFillExpression(), "fill-opacity": 0.72 } },
+        { id: "parcels-uw", type: "fill", source: "parcels", "source-layer": "parcels",
+          filter: ["==", ["get", "uw"], 1],
+          paint: { "fill-pattern": "hatch", "fill-opacity": 0.5 } },
+        // Hairline borders give each parcel its own edge; they stand in for the
+        // 2px surface gap that separates adjacent fills elsewhere.
+        { id: "parcels-line", type: "line", source: "parcels", "source-layer": "parcels",
+          paint: {
+            "line-color": css("--parcel-line"),
+            "line-width": ["interpolate", ["linear"], ["zoom"], 13, 0.2, 16, 0.8],
+            "line-opacity": 0.55,
+          } },
+        { id: "parcels-hi", type: "line", source: "parcels", "source-layer": "parcels",
+          filter: ["==", ["get", "id"], ""],
+          paint: { "line-color": css("--text-primary"), "line-width": 2 } },
+      ],
+    },
+    center: [18.6081, 53.0098],
+    zoom: 12,
+    maxZoom: 19,
+    hash: true,
+  });
+
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }));
+
+  // The uw layer references "hatch" from the initial style, so the image must
+  // be supplied on demand. Adding it inside map.on("load") is too late: the
+  // missing image keeps the map from ever reaching the loaded state, and the
+  // load handler then never runs at all.
+  map.on("styleimagemissing", (e) => {
+    if (e.id === "hatch" && !map.hasImage("hatch")) {
+      map.addImage("hatch", hatchImage(css("--text-muted")), { pixelRatio: 2 });
+    }
+  });
+
+  // Independent of map readiness -- it only touches the DOM.
+  renderLegend();
+  document.getElementById("attribution").textContent = attributionHtml();
+
+  // Paint properties are literal colours resolved from CSS variables at style
+  // build time, so they do not follow a theme change on their own. Re-resolve
+  // them when the OS scheme flips, otherwise the panel restyles and the map
+  // keeps the old palette.
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (!map.isStyleLoaded()) return;
+    map.setPaintProperty("bg", "background-color", css("--surface-1"));
+    map.setPaintProperty("parcels-fill", "fill-color", fillExpression());
+    map.setPaintProperty("parcels-line", "line-color", css("--parcel-line"));
+    map.setPaintProperty("parcels-hi", "line-color", css("--text-primary"));
+    if (map.hasImage("hatch")) {
+      map.removeImage("hatch");
+      map.addImage("hatch", hatchImage(css("--text-muted")), { pixelRatio: 2 });
+    }
+    renderLegend();
+  });
+
+  // "load" and "idle" both wait on the initial tile set, which at high zoom
+  // keeps the hint reading "loading" long after the map is usable. Prefer
+  // "sourcedata", which fires once the parcels source has tiles for the
+  // current viewport, but keep "load" as a fallback so the hint always clears.
+  const markReady = () => {
+    document.getElementById("status").textContent =
+      "Kliknij działkę, aby zobaczyć szczegóły";
+  };
+  map.on("sourcedata", (e) => {
+    if (e.sourceId === "parcels" && e.isSourceLoaded) markReady();
+  });
+  map.on("load", markReady);
+
+  map.on("error", (e) => {
+    document.getElementById("status").textContent =
+      "Błąd ładowania kafelków: " + (e.error && e.error.message || "nieznany");
+  });
+
+  const popup = new maplibregl.Popup({ closeButton: true, maxWidth: "280px" });
+
+  map.on("click", "parcels-fill", (e) => {
+    const f = e.features && e.features[0];
+    if (!f) return;
+    const p = f.properties;
+    map.setFilter("parcels-hi", ["==", ["get", "id"], p.id]);
+    // Identity is carried in text here, never by colour alone.
+    popup.setLngLat(e.lngLat).setHTML(`
+      <div class="pop-id">Działka ${p.nr}</div>
+      <div class="pop-r"><span class="pop-k">Obręb</span><span>${p.obreb}</span></div>
+      <div class="pop-r"><span class="pop-k">Identyfikator</span><span>${p.id}</span></div>
+      <div class="pop-r"><span class="pop-k">Grupa</span><span>${p.grupa}</span></div>
+      <div style="margin-top:6px">${GROUP_LABELS[p.grupa] || "—"}</div>
+      <div style="margin-top:4px;color:var(--text-secondary)">
+        ${CLASS_LABELS[p.klasa] || p.klasa}${p.uw ? " · użytkowanie wieczyste" : ""}
+      </div>
+    `).addTo(map);
+  });
+
+  map.on("mouseenter", "parcels-fill", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "parcels-fill", () => { map.getCanvas().style.cursor = ""; });
+  popup.on("close", () => map.setFilter("parcels-hi", ["==", ["get", "id"], ""]));
+}
+
+main();
+</script>
+</body>
+</html>
