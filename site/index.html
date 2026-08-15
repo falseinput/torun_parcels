@@ -187,23 +187,35 @@ const TIERS = {
 
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
-let map, isolated = null, stats = null, manifest = null;
+// Single API endpoint: TileJSON 3.0.0 plus provenance and statistics.
+const API_METADATA = "api/v1/parcels.json";
+const API_TILESET = "api/v1/parcels.pmtiles";
+
+let map, isolated = null, meta = null;
 
 /**
  * Attribution required by art. 40c ust. 3 Prawo geodezyjne i kartograficzne:
  * anyone publishing work built on material from the panstwowy zasob
  * geodezyjny i kartograficzny must state its source. The Open Data Act also
  * permits the provider to require the time of creation and of acquisition,
- * so both are shown when the manifest supplies them.
+ * so both are shown when the API supplies them.
+ *
+ * TileJSON already carries a ready-made single-line string in `attribution`;
+ * prefer it, and rebuild from `provenance` only if it is missing.
  */
 function attributionHtml() {
-  const a = (manifest && manifest.attribution) || {};
-  const source = a.source || "Państwowy zasób geodezyjny i kartograficzny";
-  const dataset = a.dataset || "Ewidencja gruntów i budynków (EGiB)";
-  const parts = [`Źródło: ${source} — ${dataset}`];
-  if (a.created) parts.push(`stan na ${a.created}`);
-  if (a.retrieved) parts.push(`pobrano ${a.retrieved}`);
-  return parts.join(" · ");
+  if (meta && meta.attribution) return meta.attribution;
+  const p = (meta && meta.provenance) || {};
+  const source = p.source || "Państwowy zasób geodezyjny i kartograficzny";
+  const dataset = p.dataset || "Ewidencja gruntów i budynków (EGiB)";
+  const parts = [`Źródło: ${source}. ${dataset}.`];
+  if (p.source_created) parts.push(`Stan na ${p.source_created}.`);
+  if (p.retrieved) parts.push(`Pobrano ${p.retrieved}.`);
+  return parts.join(" ");
+}
+
+function statistics() {
+  return (meta && meta.statistics) || null;
 }
 
 function tierFillExpression() {
@@ -240,34 +252,38 @@ function hatchImage(color) {
   return { width: s, height: s, data: new Uint8Array(g.getImageData(0, 0, s, s).data) };
 }
 
-async function resolveTilesetUrl() {
+async function loadMetadata() {
   try {
-    const res = await fetch("latest.json", { cache: "no-store" });
+    const res = await fetch(API_METADATA, { cache: "no-store" });
     if (res.ok) {
-      manifest = await res.json();
+      meta = await res.json();
+      const s = statistics();
       document.getElementById("build").textContent =
-        `Wersja ${manifest.version} · ${manifest.features.toLocaleString("pl")} działek`;
-      return new URL(manifest.url, location.href).href;
+        `Wersja ${meta.version}` +
+        (s ? ` · ${s.features.toLocaleString("pl")} działek` : "");
     }
-  } catch (_) { /* fall through to the co-located file */ }
-  return new URL("parcels-evidence.pmtiles", location.href).href;
+  } catch (_) { /* legend counts stay blank; the map still loads */ }
 }
 
-async function loadStats() {
-  try {
-    const res = await fetch("stats.json", { cache: "no-store" });
-    if (res.ok) stats = await res.json();
-  } catch (_) { /* counts stay blank */ }
+/**
+ * Resolve the tileset against this origin rather than against the TileJSON
+ * `tiles` entry. That entry holds an absolute production URL, as the spec
+ * requires, so following it would make `make serve` pull tiles from the live
+ * site instead of the local build.
+ */
+function tilesetUrl() {
+  return new URL(API_TILESET, location.href).href;
 }
 
 function renderLegend() {
   const fmt = (n) => n == null ? "—" : n.toLocaleString("pl");
-  if (stats) {
-    const sum = (keys) => keys.reduce((a, k) => a + (stats.classes[k] || 0), 0);
+  const s = statistics();
+  if (s) {
+    const sum = (keys) => keys.reduce((a, k) => a + (s.classes[k] || 0), 0);
     document.getElementById("c-publiczna").textContent = fmt(sum(TIERS.publiczna));
     document.getElementById("c-prywatna").textContent  = fmt(sum(TIERS.prywatna));
     document.getElementById("c-inne").textContent      = fmt(sum(TIERS.inne));
-    document.getElementById("c-uw").textContent        = fmt(stats.usufruct);
+    document.getElementById("c-uw").textContent        = fmt(s.usufruct);
   }
 
   const host = document.getElementById("classes");
@@ -284,7 +300,7 @@ function renderLegend() {
     text.textContent = label;
     const count = document.createElement("span");
     count.className = "count";
-    count.textContent = stats ? fmt(stats.classes[key] || 0) : "—";
+    count.textContent = s ? fmt(s.classes[key] || 0) : "—";
     btn.append(swatch, text, count);
     btn.onclick = () => {
       isolated = isolated === key ? null : key;
@@ -304,8 +320,8 @@ async function main() {
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);
 
-  await loadStats();
-  const url = await resolveTilesetUrl();
+  await loadMetadata();
+  const url = tilesetUrl();
 
   map = new maplibregl.Map({
     container: "map",

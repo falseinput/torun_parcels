@@ -181,7 +181,39 @@ def build_classification_sql() -> str:
 
 # --- Layout -----------------------------------------------------------------
 
+# Name of the local build artefact. The published name is API_TILESET_NAME.
 TILESET_NAME = "parcels-evidence.pmtiles"
+
+# --- Published API ----------------------------------------------------------
+#
+# Two endpoints, both static files:
+#   GET {SITE_BASE_URL}/api/v1/parcels.pmtiles   the tileset, always latest
+#   GET {SITE_BASE_URL}/api/v1/parcels.json      TileJSON 3.0.0 + provenance
+#
+# The v1 prefix versions the contract: a future change of shape ships as v2
+# while v1 keeps working.
+
+SITE_BASE_URL = "https://falseinput.github.io/torun_parcels"
+API_VERSION = "v1"
+API_DIR = f"api/{API_VERSION}"
+API_TILESET_NAME = "parcels.pmtiles"
+API_METADATA_NAME = "parcels.json"
+
+TILEJSON_NAME = "torun-parcels"
+TILEJSON_DESCRIPTION = (
+    "Ownership category, parcel number and geometry for Toruń cadastral parcels."
+)
+
+# vector_layers[].fields for the TileJSON document. Keys must match exactly the
+# attributes the transform step selects into the tiles.
+FIELD_DESCRIPTIONS = {
+    "id": "Full parcel identifier (ID_DZIALKI)",
+    "nr": "Parcel number within the obręb",
+    "obreb": "Obręb (cadastral district) number",
+    "grupa": "EGiB registry group, 1-16",
+    "klasa": "Ownership class",
+    "uw": "1 if the parcel is held in użytkowanie wieczyste, otherwise 0",
+}
 
 # --- Attribution ------------------------------------------------------------
 #
@@ -195,3 +227,14 @@ ATTRIBUTION_SOURCE = (
     "Państwowy zasób geodezyjny i kartograficzny — Prezydent Miasta Torunia"
 )
 ATTRIBUTION_DATASET = "Ewidencja gruntów i budynków (EGiB)"
+LEGAL_BASIS = "art. 40c ust. 3 Prawo geodezyjne i kartograficzne"
+
+
+def attribution_text(created: str | None, retrieved: str | None) -> str:
+    """Single-line attribution for the TileJSON `attribution` field."""
+    text = f"Źródło: {ATTRIBUTION_SOURCE}. {ATTRIBUTION_DATASET}."
+    if created:
+        text += f" Stan na {created}."
+    if retrieved:
+        text += f" Pobrano {retrieved}."
+    return text

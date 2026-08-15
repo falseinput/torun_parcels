@@ -19,6 +19,7 @@ import sys
 import urllib.error
 from pathlib import Path
 
+import config
 from http_util import get_text
 
 
@@ -61,8 +62,8 @@ def main() -> int:
     parser.add_argument("--stats", default="build/stats.json", type=Path)
     parser.add_argument(
         "--published",
-        default="",
-        help="URL or path of the currently published latest.json",
+        default=f"{config.SITE_BASE_URL}/{config.API_DIR}/{config.API_METADATA_NAME}",
+        help="URL or path of the currently published parcels.json",
     )
     args = parser.parse_args()
 
@@ -76,12 +77,17 @@ def main() -> int:
 
     published = load_published(args.published)
     if published is None:
-        return emit(True, "no published manifest to compare against")
+        return emit(True, "no published metadata to compare against")
 
-    previous = published.get("content_sha256")
+    # The hash lives under the TileJSON provenance extension. A document
+    # without it is unusable as a comparison basis, so rebuild rather than
+    # crash -- that covers an older layout or a truncated response.
+    previous = (published.get("provenance") or {}).get("content_sha256")
+    if not previous:
+        return emit(True, "published metadata carries no provenance.content_sha256")
     if previous != digest:
-        return emit(True, f"content hash {previous} -> {digest}")
-    return emit(False, f"content hash unchanged ({digest})")
+        return emit(True, f"content hash {previous[:12]} -> {digest[:12]}")
+    return emit(False, f"content hash unchanged ({digest[:12]})")
 
 
 if __name__ == "__main__":
