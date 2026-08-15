@@ -31,10 +31,19 @@ def load_published(source: str) -> dict | None:
         path = Path(source)
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
-        print(f"  could not read published manifest ({exc}) -- treating as changed")
+    except urllib.error.HTTPError as exc:
+        # The expected state on the very first build: Pages has published
+        # nothing yet, so there is no manifest to compare against.
+        if exc.code == 404:
+            print("  no manifest published yet (HTTP 404)")
+        else:
+            print(f"  could not read published manifest (HTTP {exc.code})")
+    # http_util.get re-raises exhausted retries as RuntimeError, so catch that
+    # too or a transient network fault aborts the build instead of rebuilding.
+    except (urllib.error.URLError, OSError, RuntimeError) as exc:
+        print(f"  could not read published manifest ({exc})")
     except json.JSONDecodeError as exc:
-        print(f"  published manifest is not valid JSON ({exc}) -- treating as changed")
+        print(f"  published manifest is not valid JSON ({exc})")
     return None
 
 
