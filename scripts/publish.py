@@ -174,8 +174,14 @@ def main() -> int:
         else:
             item.unlink()
 
+    # Directories too, not just files: the glyph PBFs the label layer needs
+    # live in site/glyphs/<font stack>/. A file-only copy publishes a style
+    # that references them and a site that does not carry them, and the only
+    # symptom is parcel numbers silently failing to render.
     for item in args.site.iterdir():
-        if item.is_file():
+        if item.is_dir():
+            shutil.copytree(item, out / item.name)
+        else:
             shutil.copy2(item, out / item.name)
 
     api_dir = out / config.API_DIR

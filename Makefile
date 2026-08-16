@@ -1,8 +1,9 @@
 PYTHON ?= python3
+NODE   ?= node
 SCRIPTS := scripts
 
 .DEFAULT_GOAL := help
-.PHONY: help all fetch transform tile validate validate-offline validate-deep publish serve clean check-tools
+.PHONY: help all fetch transform tile validate validate-offline validate-deep publish serve clean check-tools glyphs
 
 help: ## Show available targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -13,6 +14,15 @@ check-tools: ## Verify ogr2ogr and tippecanoe are on PATH
 	@command -v tippecanoe >/dev/null || { echo "missing: tippecanoe";       exit 1; }
 	@echo "ogr2ogr    $$(ogr2ogr --version)"
 	@echo "tippecanoe $$(tippecanoe --version 2>&1 | head -1)"
+
+# Deliberately outside `all`: the glyphs are a checked-in build *input*, not an
+# artefact. Parcel numbers are digits and '/', so the output only changes when
+# the font or the label alphabet does -- and regenerating needs node, which the
+# rest of the pipeline does not.
+glyphs: ## Regenerate site/glyphs from Noto Sans (only when the font changes)
+	@command -v node >/dev/null || { echo "missing: node (needed only for glyphs)"; exit 1; }
+	@test -d node_modules/fontnik || npm install
+	$(NODE) $(SCRIPTS)/glyphs.js
 
 all: fetch transform tile validate publish ## Full pipeline end to end
 
